@@ -6,7 +6,7 @@
 #define PIN_SWITCH_FORCE     A6 //defekt
 #define PIN_SWITCH_DEBUG     A7//defekt
 
-#define PIN_VSS_SENSOR       2
+#define PIN_VSS_SENSOR       3
 #define PIN_HIGH_BEAM        4
 
 #define PIN_SERVO_LINKS      5
@@ -27,8 +27,8 @@ The circuit:
  8, 9, 10, 11, 14 (MISO), 15 (SCK), 16 (MOSI).
 **/
 
-#define PIN_BT_RX            11
-#define PIN_BT_TX            10
+#define PIN_BT_RX            11 // 8
+#define PIN_BT_TX            10 // 7
 
 #define PIN_PWM1             3
 #define PIN_PWM2             6 //defekt
@@ -96,6 +96,30 @@ boolean printDEBUG=false;
 MeetAndroid meetAndroid(PIN_BT_RX, PIN_BT_TX,9600); 
 
 
+#include <avr/pgmspace.h>
+  
+void StreamPrint_progmem(PGM_P format,...)
+{
+  // program memory version of printf - copy of format string and result share a buffer
+  // so as to avoid too much memory use
+  char formatString[128], *ptr;
+  strncpy_P( formatString, format, sizeof(formatString) ); // copy in from program mem
+  // null terminate - leave last char since we might need it in worst case for result's \0
+  formatString[ sizeof(formatString)-2 ]='\0'; 
+  ptr=&formatString[ strlen(formatString)+1 ]; // our result buffer...
+  va_list args;
+  va_start (args,format);
+  vsnprintf(ptr, sizeof(formatString)-1-strlen(formatString), formatString, args );
+  va_end (args);
+  formatString[ sizeof(formatString)-1 ]='\0'; 
+  Serial.println(ptr); Serial.flush();
+  meetAndroid.send(ptr);
+}
+ 
+#define debug(format, ...) StreamPrint_progmem(PSTR(format),##__VA_ARGS__)
+#define debugstream(stream,format, ...) StreamPrint_progmem(stream,PSTR(format),##__VA_ARGS__)
+
+
 /** `========================================================================================================================================
  **
  **                                  H a r d w a r e   B u t t o n s
@@ -145,7 +169,7 @@ void rotate_KTMode(){
      c_KTMode='c';
      move_close();
   }
-  printf_P(PSTR("new mode from: %c to %c\n"),old_c_KTMode,c_KTMode);
+  debug(("new mode from: %c to %c\n"),old_c_KTMode,c_KTMode);
 }
 
 #include <FastSPI_LED2.h>
@@ -154,34 +178,8 @@ CRGB leds[NUM_LEDS];
 
 void print_debug(){
   int i;
-  printf_P(PSTR("Speed [%d], ServoPosL [%d], ServoPosR [%d], c_KTMode [%c], LedMode [%d]\n"),Speed,myservo_links.read(),myservo_rechts.read(),c_KTMode,ledMode);
+  debug(("Speed [%d], ServoPosL [%d], ServoPosR [%d], c_KTMode [%c], LedMode [%d]\n"),Speed,myservo_links.read(),myservo_rechts.read(),c_KTMode,ledMode);
 }
-#include "Stream.h"
-#define ByteBufferLenght 128
-int ma_bufferCount;
-char ma_buffer[ByteBufferLenght];
-
-static FILE uartout = {0} ;
-
-// create a output function
-// This works because Serial.write, although of
-// type virtual, already exists.
-static int uart_putchar (char c, FILE *stream)
-{
-    Serial.write(c) ;  Serial.flush();
-
-    if(ma_bufferCount >= ByteBufferLenght)     ma_bufferCount=0;  
-
-    ma_buffer[ma_bufferCount++]=c;
-    
-    if(c ==  '\n'){
-      ma_buffer[ma_bufferCount++]='\0';
-      meetAndroid.send((char*)ma_buffer);
-      ma_bufferCount=0; delete[] ma_buffer;
-    }
-    return 0 ;
-}
-
 
 /** `========================================================================================================================================
  ** `========================================================================================================================================
@@ -342,10 +340,10 @@ void one_color_all(int cred, int cgrn, int cblu) { //-SET ALL LEDS TO ONE COLOR
 
 void LED_set(char *part,int rval, int gval, int bval=0,int force_update=0){
   for (int i=0;i<5;i++){
-    //printf_P(PSTR("LEDset: matching %s with %s\n"),part,LED_seg[i].name);
+    //debug(("LEDset: matching %s with %s\n"),part,LED_seg[i].name);
     
     if(strcmp(LED_seg[i].name,part)==0){
-      //printf_P(PSTR("LEDset: match, setting %s to %d,%d,%d\n"),LED_seg[i].name,rval,gval,bval);
+      //debug(("LEDset: match, setting %s to %d,%d,%d\n"),LED_seg[i].name,rval,gval,bval);
       for( int idx = LED_seg[i].PINSTART ; idx < LED_seg[i].PINEND; idx++ ) {
         leds[idx].setRGB( rval,gval,bval);
       }
@@ -400,7 +398,7 @@ void flashing(){
 
 void dblflash() {
   if(time > nextUpdate){
-    printf_P(PSTR("LED: dblflash\n"));
+    debug(("LED: dblflash\n"));
     nextUpdate=millis()+1000;
   }
   
@@ -417,7 +415,7 @@ void dblflash() {
 
 void rainbow(uint8_t wait) {
   if(time > nextUpdate){
-    printf_P(PSTR("LED: rainbow\n"));
+    debug(("LED: rainbow\n"));
     nextUpdate=millis()+1000;
   }
   int i, j;
@@ -435,7 +433,7 @@ void rainbow(uint8_t wait) {
 // along the chain
 void rainbowCycle(uint8_t wait) {
   if(time > nextUpdate){
-    printf_P(PSTR("LED: rainbowCycle\n"));
+    debug(("LED: rainbowCycle\n"));
     nextUpdate=millis()+1000;
   }
 
@@ -464,7 +462,7 @@ void antialisedPoint(int r, int g, int b, int step, int dscale, int sleep)
       int delta = 1-abs(i-j*step)/1000*dscale;
       if(delta<0) delta=0;
       leds[i].setRGB( (delta*r), (delta*g), (delta*b));
-      //printf_P(PSTR("LED: set Nr %d to (%d,%d,%d)\n"), i, (delta*r), (delta*g), (delta*b));
+      //debug(("LED: set Nr %d to (%d,%d,%d)\n"), i, (delta*r), (delta*g), (delta*b));
     }
     LEDS.show();      
   }
@@ -478,9 +476,9 @@ void larson_scanner() {
   int i, j;
   int r=0,  g=0, b=maxbright, wait=0;
 
-  //if(printDEBUG==1) printf_P(PSTR("LED: NEW larson pos is now %d, dir is now %d\n"),larson_pos,larson_dir);
+  //if(printDEBUG==1) debug(("LED: NEW larson pos is now %d, dir is now %d\n"),larson_pos,larson_dir);
   for(i=0; i<((NUM_LEDS-1) ); i++) {
-    //if(printDEBUG==1) printf_P(PSTR("LED: FRESH1 larson pos is now %d\n"),larson_pos);
+    //if(printDEBUG==1) debug(("LED: FRESH1 larson pos is now %d\n"),larson_pos);
     // Draw 5 pixels centered on pos. setPixelColor() will clip
     // any pixels off the ends of the strip, no worries there.
     // we'll make the colors dimmer at the edges for a nice pulse
@@ -494,13 +492,13 @@ void larson_scanner() {
     leds[(larson_pos + 3)].setRGB(r/16, g/16, b/16);
 
     int opos=(int)larson_pos;
-    //if(printDEBUG==1) printf_P(PSTR("LED: FRESH2 larson pos is now %d %d\n"),larson_pos,opos);
+    //if(printDEBUG==1) debug(("LED: FRESH2 larson pos is now %d %d\n"),larson_pos,opos);
     
     LEDS.show();
     delay(1);
     
     larson_pos=(int)opos;
-    //if(printDEBUG==1) printf_P(PSTR("LED: FRESH3 larson pos is now %d %d\n"),larson_pos,opos);
+    //if(printDEBUG==1) debug(("LED: FRESH3 larson pos is now %d %d\n"),larson_pos,opos);
     
     //delay(wait);
     // If we wanted to be sneaky we could erase just the tail end
@@ -510,43 +508,43 @@ void larson_scanner() {
         leds[(larson_pos + j)].setRGB(0,0,0);
     // Bounce off ends of strip
 
-    //if(printDEBUG==1) printf_P(PSTR("LED: FRESH4 larson pos is now %d\n"),larson_pos);
+    //if(printDEBUG==1) debug(("LED: FRESH4 larson pos is now %d\n"),larson_pos);
     
     if(larson_dir == 1){
-      //if(printDEBUG==1) printf_P(PSTR("LED: INCDEC larson dir is positive inc %d\n"),larson_pos);
+      //if(printDEBUG==1) debug(("LED: INCDEC larson dir is positive inc %d\n"),larson_pos);
       larson_pos=larson_pos+1;
-      //if(printDEBUG==1) printf_P(PSTR("LED: INCDEC larson pos is now %d\n"),larson_pos);
+      //if(printDEBUG==1) debug(("LED: INCDEC larson pos is now %d\n"),larson_pos);
     }else
     if(larson_dir == -1){
-      //if(printDEBUG==1) printf_P(PSTR("LED: INCDEC larson dir is negative dec %d\n"),larson_pos);
+      //if(printDEBUG==1) debug(("LED: INCDEC larson dir is negative dec %d\n"),larson_pos);
       larson_pos=larson_pos-1;
-      //if(printDEBUG==1) printf_P(PSTR("LED: INCDEC larson pos is now %d\n"),larson_pos);
+      //if(printDEBUG==1) debug(("LED: INCDEC larson pos is now %d\n"),larson_pos);
     }
     
-    //if(printDEBUG==1) printf_P(PSTR("LED: BETWEEN larson at newpos %d %d\n"),larson_pos,larson_dir);
+    //if(printDEBUG==1) debug(("LED: BETWEEN larson at newpos %d %d\n"),larson_pos,larson_dir);
 
     if(larson_pos < 0) {
-      //if(printDEBUG==1) printf_P(PSTR("LED: WRAP larson turning dir positive at %d (newpos 1)\n"),larson_pos);
+      //if(printDEBUG==1) debug(("LED: WRAP larson turning dir positive at %d (newpos 1)\n"),larson_pos);
       larson_pos = 1;
       larson_dir = 1;
-      //if(printDEBUG==1) printf_P(PSTR("LED: WRAP larson pos is now %d, dir is now %d\n"),larson_pos,larson_dir);
+      //if(printDEBUG==1) debug(("LED: WRAP larson pos is now %d, dir is now %d\n"),larson_pos,larson_dir);
     } else if(larson_pos >= (NUM_LEDS-2)) {
-      //if(printDEBUG==1) printf_P(PSTR("LED: WRAP larson turning dir negative at %d (newpos 128)\n"),larson_pos);
+      //if(printDEBUG==1) debug(("LED: WRAP larson turning dir negative at %d (newpos 128)\n"),larson_pos);
       larson_pos = 128;
       larson_dir = -1;
-      //if(printDEBUG==1) printf_P(PSTR("LED: WRAP larson pos is now %d, dir is now %d\n"),larson_pos,larson_dir);
+      //if(printDEBUG==1) debug(("LED: WRAP larson pos is now %d, dir is now %d\n"),larson_pos,larson_dir);
     }
   }
 }
     
 void rotate_ledMode(){
   ledMode++;
-  printf_P(PSTR("LED: ledMode now %d\n"),ledMode);
+  debug(("LED: ledMode now %d\n"),ledMode);
   if(ledMode >5) ledMode=0;
 }
 
 void do_led_effects(){ 
-  //printf_P(PSTR("LED: running Effect id %d\n"),ledMode);
+  //debug(("LED: running Effect id %d\n"),ledMode);
   if (ledMode == 0) { all_off();}
   else if (ledMode == 1) {breathe();}                //---STRIP RAINBOW FADE 
   else if (ledMode == 2) {rainbow(1);}       //--- SIN WAVE BRIGHTNESS  
@@ -616,7 +614,7 @@ void  sCmd_do_command(const char *comm){
  **/
 
 void servo_attach(){ 
-  printf_P(PSTR("Exaust: attaching Servos [%d,%d]\n"),minFreq,maxFreq);
+  debug(("Exaust: attaching Servos [%d,%d]\n"),minFreq,maxFreq);
 
   myservo_links.attach(PIN_SERVO_LINKS, minFreq, maxFreq);
   myservo_rechts.attach(PIN_SERVO_RECHTS, minFreq, maxFreq);
@@ -634,7 +632,7 @@ void servo_write(int pos){
   myservo_links.write(pos);
   myservo_rechts.write(pos);
   ServoPos=pos;
-  printf_P(PSTR("Exaust: set to %d, pos is now (%d,%d) [%d,%d]\n"),pos,ServoPos,ServoPos,minFreq,maxFreq);
+  debug(("Exaust: set to %d, pos is now (%d,%d) [%d,%d]\n"),pos,ServoPos,ServoPos,minFreq,maxFreq);
   servo_detach();
 }
 
@@ -687,7 +685,7 @@ void do_servo_freq_adjust(){
     myservo_links.write(0);
     myservo_rechts.write(0);
     delay(250);
-    printf_P(PSTR("Servo Min Freq: %d\n"),(minFreq+minFreqTestVal));
+    debug(("Servo Min Freq: %d\n"),(minFreq+minFreqTestVal));
     minFreqTestVal+=10;
     if((minFreq+minFreqTestVal) > 1000) minFreqTest=0;
   }else{
@@ -706,7 +704,7 @@ void do_servo_freq_adjust(){
     myservo_links.write(180);
     myservo_rechts.write(180);
     delay(250);
-    printf_P(PSTR("Servo Max Freq: %d\n"),(maxFreq-maxFreqTestVal));
+    debug(("Servo Max Freq: %d\n"),(maxFreq-maxFreqTestVal));
     maxFreqTestVal+=10;
     if((maxFreq-maxFreqTestVal) < 1800) maxFreqTest=0;
   }    else{
@@ -727,8 +725,8 @@ void do_servo_freq_adjust(){
 void setup() 
 { 
   loadSettings();
-  pinMode(2, INPUT); 
-  attachInterrupt(0, rpm, RISING); 
+  pinMode(PIN_VSS_SENSOR, INPUT); 
+  attachInterrupt(2, rpm, RISING); 
   digitalWrite(A2,HIGH);
   digitalWrite(A3,HIGH);
   digitalWrite(A4,HIGH);
@@ -742,17 +740,13 @@ void setup()
   delay(2000);
 
   Serial.begin(57600);
-  // fill in the UART file descriptor with pointer to writer.
-  fdev_setup_stream (&uartout, uart_putchar, NULL, _FDEV_SETUP_WRITE);
-  // The uart is the standard output device STDOUT.
-  stdout = &uartout ;
-   
- // LEDS.addLeds<WS2801, 11, 13, BGR, DATA_RATE_MHZ(1)>(leds, NUM_LEDS);
+  
+  LEDS.addLeds<WS2801, 11, 13, BGR, DATA_RATE_MHZ(1)>(leds, NUM_LEDS);
 
   meetAndroid.registerFunction(and_do_COMMAND, 'z');  
   sCmd.setDefaultHandler(sCmd_do_command);
 
-  printf_P(PSTR("--- INIT COMPLETE ---\n"));
+  debug(("--- INIT COMPLETE ---\n"));
 //  print_debug();
 } 
 
@@ -770,19 +764,17 @@ void setup()
 void loop () 
 {
 
-  ServoPos=((myservo_links.read()+myservo_rechts.read())/2);
   int loopDebug=0;
-  
   time=millis();
-  sCmd.readSerial();
   meetAndroid.receive(); // you need to keep this in your loop() to receive events    
+  sCmd.readSerial();
 
   if ( (time-lastPulseRead) > 1000 ) {
     lastSpeed=Speed;
     lastPulseRead=time;
     Speed = (HallSensorTicks/9.09888888888888);
     if(lastSpeed != Speed){
-      printf_P(PSTR("Speed: %d km/h => %d km/h\tServo %d\tHallSensorTicks %d\n"),lastSpeed,Speed,ServoPos,HallSensorTicks);
+      debug(("Speed: %d km/h => %d km/h\tServo %d\tHallSensorTicks %d\n"),lastSpeed,Speed,ServoPos,HallSensorTicks);
     }
     HallSensorTicks=0;
   }
@@ -799,12 +791,12 @@ void loop ()
     But[i].listen();
   }
 
-//  if (loopDebug==1) printf_P(PSTR("-- Button react\n"));
+//  if (loopDebug==1) debug(("-- Button react\n"));
   if(time >5000){
     for(int i=0; i<BUT_COUNT; i++){
       if(But[i].isHold()){  
         if(lastButStatus[i]!= 'H'){
-          printf_P(PSTR("But[%d] hold\n"),i,lastButStatus[i]);
+          debug(("But[%d] hold\n"),i,lastButStatus[i]);
           if(i == 0) c_KTMode='f';
         }
         ButStatus[i]='H';
@@ -816,20 +808,20 @@ void loop ()
         if(i == 3) ledMode=1;
         if(i == 3) ledMode=0;
 
-        printf_P(PSTR("But[%d] pressed\n"),i);
+        debug(("But[%d] pressed\n"),i);
       }else
       if(But[i].onRelease()){
         ButStatus[i]='R';
-        printf_P(PSTR("But[%d] released\n"),i);
+        debug(("But[%d] released\n"),i);
       }else
       if(But[i].onDoubleClick()){
         ButStatus[i]='D';
-        printf_P(PSTR("But[%d] dblclicked\n"),i);
+        debug(("But[%d] dblclicked\n"),i);
       }    
     }
    }
   
-//  if (loopDebug==1) printf_P(PSTR("-- KTMode react\n"));
+//  if (loopDebug==1) debug(("-- KTMode react\n"));
   // rotate modi automatic > closed  / forced => closed
    
   if ( c_KTMode == 'f'){
@@ -850,12 +842,12 @@ void loop ()
      move_close();
   }
 
-//  if (loopDebug==1)   printf_P(PSTR("-- check print debug listen\n"));
+//  if (loopDebug==1)   debug(("-- check print debug listen\n"));
   if(time > nextUpdate){
     if(printDEBUG==true) print_debug();
     nextUpdate=millis()+5000;
   }
-//  if (loopDebug==1) printf_P(PSTR("-- do LED Effects \n"));
+//  if (loopDebug==1) debug(("-- do LED Effects \n"));
 
 // do_servo_freq_adjust();
 
@@ -878,16 +870,16 @@ void do_command(int argC,char **arg){
   
   if(strcmp(cmd,"mode")==0){
     ledMode = atoi(arg[1]);
-    printf_P(PSTR("new LED mode: %d\n"),ledMode);
+    debug(("new LED mode: %d\n"),ledMode);
   }else
   if(strcmp(cmd,"ex")==0){
     if(arg[1] != NULL) {
       servo_write(atoi(arg[1]));
       c_KTMode='m';
-      printf_P(PSTR("Exaust Servo pos: %d\n"),atoi(arg[1]));
+      debug(("Exaust Servo pos: %d\n"),atoi(arg[1]));
     }else{
       Etoggle();
-      printf_P(PSTR("toggled exaust\n"));
+      debug(("toggled exaust\n"));
     }
   }else
 
@@ -897,18 +889,18 @@ void do_command(int argC,char **arg){
     }else{
        rotate_KTMode();
     }    
-    printf_P(PSTR("new c_KTMode: %s\n"),c_KTMode);
+    debug(("new c_KTMode: %s\n"),c_KTMode);
   }else
   if(strcmp(cmd,"bri")==0){
     if(arg[1] != NULL ){
       maxbright=atoi(arg[1]);
-      printf_P(PSTR("new LED brightness: %d\n"),atoi(arg[1]));
+      debug(("new LED brightness: %d\n"),atoi(arg[1]));
     }
   }else
 
   if(strcmp(cmd,"led")==0){
     LED_set(arg[1],atoi(arg[2]),atoi(arg[3]),atoi(arg[4]));
-    printf_P(PSTR("LED set: %s to %d/%d/%d\n"),arg[1],atoi(arg[2]),atoi(arg[3]),atoi(arg[4]) );
+    debug(("LED set: %s to %d/%d/%d\n"),arg[1],atoi(arg[2]),atoi(arg[3]),atoi(arg[4]) );
   }else
 
   if(strcmp(cmd,"print")==0){
@@ -925,22 +917,22 @@ void do_command(int argC,char **arg){
 
   if(strcmp(cmd,"minf")==0){
     minFreq=atoi(arg[1]);
-    printf_P(PSTR("minFreq is now: %d\n"),minFreq);
+    debug(("minFreq is now: %d\n"),minFreq);
     servo_write(0);
   }else
 
   if(strcmp(cmd,"maxf")==0){
     maxFreq=atoi(arg[1]);
-    printf_P(PSTR("maxFreq is now: %d\n"),maxFreq);
+    debug(("maxFreq is now: %d\n"),maxFreq);
     servo_write(180);
   }else
 
   if(strcmp(cmd,"debug")==0){
     printDEBUG=!printDEBUG;
-    printf_P(PSTR("print debug is now: %d\n"),printDEBUG);
+    debug(("print debug is now: %d\n"),printDEBUG);
   }else{
-    printf_P(PSTR("unknown command: %s\n"),arg[0]);
-    printf_P(PSTR("valid commands:\nmode,ex,toggle,bri,mintest,maxtest,minf,maxf,print,debug\n"));
+    debug(("unknown command: %s\n"),arg[0]);
+    debug(("valid commands:\nmode,ex,toggle,bri,mintest,maxtest,minf,maxf,print,debug\n"));
   }  
 }
   
