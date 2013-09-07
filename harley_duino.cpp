@@ -1,222 +1,106 @@
+#define PIN_VSS_SENSOR       2
+#define INTERRUPT_VSS        0
 
-#define PIN_TOUCH_BUTTON_S1  A2
-#define PIN_TOUCH_BUTTON_S2  A3
-#define PIN_TOUCH_BUTTON_S3  A4
-#define PIN_BUTTON_TOGGLE    A5
-#define PIN_SWITCH_FORCE     A6 //defekt
-#define PIN_SWITCH_DEBUG     A7//defekt
+#define TOUCH_SENS           3
 
-#define PIN_VSS_SENSOR       3
-#define PIN_HIGH_BEAM        4
+#define PIN_SERVO_LINKS      5 // 5
+#define PIN_SERVO_RECHTS     6 // 6  // 9
 
-#define PIN_SERVO_LINKS      5
-#define PIN_SERVO_RECHTS     9
+#define PIN_BT_RX             10 // 8
+#define PIN_BT_TX             11 // 7
 
-/**
-The circuit: 
- Two devices which communicate serially are needed.
- * HC-06 device's TX attached to digital pin 8, RX to pin 7
- 
- Note:
- Not all pins on the Mega and Mega 2560 support change interrupts, 
- so only the following can be used for RX: 
- 10, 11, 12, 13, 50, 51, 52, 53, 62, 63, 64, 65, 66, 67, 68, 69
- 
- Not all pins on the Leonardo support change interrupts, 
- so only the following can be used for RX: 
- 8, 9, 10, 11, 14 (MISO), 15 (SCK), 16 (MOSI).
-**/
 
-#define PIN_BT_RX            11 // 8
-#define PIN_BT_TX            10 // 7
+#define BAUD_USB              115200
+#define BAUD_BT               9600
 
-#define PIN_PWM1             3
-#define PIN_PWM2             6 //defekt
-#define PIN_PWM3             7
 
-#define NUM_LEDS             130
+#define PIN_SPI_CLK          13
+#define PIN_SPI_DATA         12
 
-#define SERIALCOMMAND_DEBUG
+#define NUM_LEDS               130 // 130
 
-#define LED_STRIP_RIMR_START 0
-#define LED_STRIP_RIMR_END 20
+#define LED_STRIP_RIMR_START   0
+#define LED_STRIP_RIMR_END     20
 
-#define LED_STRIP_BODY_START 20
-#define LED_STRIP_BODY_END 80
+#define LED_STRIP_BODY_START   20
+#define LED_STRIP_BODY_END     80
 
-#define LED_STRIP_RIMF_START 80
-#define LED_STRIP_RIMF_END 100
+#define LED_STRIP_RIMF_START   80
+#define LED_STRIP_RIMF_END     100
 
-#define LED_STRIP_MASK_START 100
-#define LED_STRIP_MASK_END 120
+#define LED_STRIP_MASK_START   100
+#define LED_STRIP_MASK_END     120
 
-#define LED_STRIP_EYE_START 120
-#define LED_STRIP_EYE_END 130
+#define LED_STRIP_EYE_START    120
+#define LED_STRIP_EYE_END      130
 
-typedef struct {
-  char *name;
-  int PINSTART;
-  int PINEND;
-  int rval;
-  int gval;
-  int bval;
-  int set;
-} LED_segment;
-
-LED_segment LED_seg[]={
-  {"rims_rear",    LED_STRIP_RIMR_START, LED_STRIP_RIMR_END,0,0,0,0},
-  {"body",        LED_STRIP_BODY_START, LED_STRIP_BODY_END,0,0,0,0},
-  {"rims_front",   LED_STRIP_RIMF_START, LED_STRIP_RIMF_END,0,0,0,0},
-  {"mask",        LED_STRIP_MASK_START, LED_STRIP_MASK_END,0,0,0,0},
-  {"eyes",        LED_STRIP_EYE_START, LED_STRIP_EYE_END,0,0,0,0}
+int LEDpart[][2] = {
+	{LED_STRIP_RIMR_START, LED_STRIP_RIMR_END},
+  {LED_STRIP_RIMF_START, LED_STRIP_RIMF_END},
+  {LED_STRIP_BODY_START, LED_STRIP_BODY_END},
+  {LED_STRIP_MASK_START, LED_STRIP_MASK_END},
+  {LED_STRIP_EYE_START, LED_STRIP_EYE_END}
 };
-  
+unsigned int my_PIN[16]; //={1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1};
 
-char old_c_KTMode, c_KTMode='f';
-
-int maxbright=10;
-
-int minFreq=650;
-int maxFreq=2400;
+int Speed,lastSpeed;
+int ServoPos = 0,ServoPosL=0,ServoPosR=0;
+unsigned int ledMode=0;
+int maxbright=30;
+int minFreq=1000;
+int maxFreq=2000;
 int minFreqTest,maxFreqTest;
 int minFreqTestVal,maxFreqTestVal;
-
+unsigned long time, Tlocked, lastPulseRead, nextUpdate, debugUntil, debugThrottle;
 volatile int HallSensorTicks = 0; 
-int Speed,lastSpeed;
-int ServoPos = 0;
+
 boolean printDEBUG=false;
+
+#include <SoftwareSerial.h>
+#include <SerialCommand.h>
+#include <SoftwareSerialCommand.h>
+
+SoftwareSerial SerialBT(PIN_BT_RX,PIN_BT_TX);
+
+SerialCommand sCmd;     // The demo SerialCommand object
+
+SoftwareSerialCommand sCmdBT;     // The demo SerialCommand object
+
+
+#include <avr/pgmspace.h>
+
+void StreamPrint_progmem(PGM_P format,...)
+{ 
+
+	// program memory version of printf - copy of format string and result share a buffer
+	// so as to avoid too much memory use
+	char formatString[128], *ptr;
+	strncpy_P( formatString, format, sizeof(formatString) ); // copy in from program mem
+	// null terminate - leave last char since we might need it in worst case for result's \0
+	//  strcat(formatString,LINEEND);
+	formatString[ sizeof(formatString)-2 ]='\0'; 
+	ptr=&formatString[ strlen(formatString)+1 ]; // our result buffer...
+	va_list args;
+	va_start (args,format);
+	vsnprintf(ptr, sizeof(formatString)-1-strlen(formatString), formatString, args );
+	va_end (args);
+	formatString[ sizeof(formatString)-1 ]='\0'; 
+	Serial.println(ptr);
+	SerialBT.println(ptr);
+}
+
+#define debug(format, ...) StreamPrint_progmem(PSTR(format),##__VA_ARGS__)
+#define dbstream(stream,format, ...) StreamPrint_progmem(stream,PSTR(format),##__VA_ARGS__)
+
+
+boolean counterwise=true;
+
+char old_c_KTMode, c_KTMode='f';
 
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdlib.h> 
 #include <string.h>   // String function definitions 
-
-#include <MeetAndroid.h>
-#include <SoftwareSerial.h>
-MeetAndroid meetAndroid(PIN_BT_RX, PIN_BT_TX,9600); 
-
-
-#include <avr/pgmspace.h>
-  
-void StreamPrint_progmem(PGM_P format,...)
-{
-  // program memory version of printf - copy of format string and result share a buffer
-  // so as to avoid too much memory use
-  char formatString[128], *ptr;
-  strncpy_P( formatString, format, sizeof(formatString) ); // copy in from program mem
-  // null terminate - leave last char since we might need it in worst case for result's \0
-  formatString[ sizeof(formatString)-2 ]='\0'; 
-  ptr=&formatString[ strlen(formatString)+1 ]; // our result buffer...
-  va_list args;
-  va_start (args,format);
-  vsnprintf(ptr, sizeof(formatString)-1-strlen(formatString), formatString, args );
-  va_end (args);
-  formatString[ sizeof(formatString)-1 ]='\0'; 
-  Serial.println(ptr); Serial.flush();
-  meetAndroid.send(ptr);
-}
- 
-#define debug(format, ...) StreamPrint_progmem(PSTR(format),##__VA_ARGS__)
-#define debugstream(stream,format, ...) StreamPrint_progmem(stream,PSTR(format),##__VA_ARGS__)
-
-
-/** `========================================================================================================================================
- **
- **                                  H a r d w a r e   B u t t o n s
- **
- ** `========================================================================================================================================
- **/
-#include <Button.h>
-
-#define BUT_COUNT 4
-  
-Button But[BUT_COUNT] = { Button(A2, LOW),
-                          Button(A3, LOW),
-                          Button(A4, LOW),
-                          Button(A5, LOW),
-                        };
-byte lastButStatus[BUT_COUNT]={'r','r','r','r'};
-byte ButStatus[BUT_COUNT]={'r','r','r','r'};
-
-#include <Servo.h>
-Servo myservo_links; // erzeugt ein Servo-Objekt
-Servo myservo_rechts; // erzeugt ein Servo-Objekt
-
-//#include <Cmd.h>
-#include <SerialCommand.h>
-SerialCommand sCmd;
-
-unsigned long time, Tlocked, lastPulseRead, nextUpdate;
-boolean  attachedAndroid,attachedServos,attachedSerial,attachedLEDFunctions = false;
-int ledMode=1;
-
-void rpm ()      //This is the function that the interupt calls 
-{ 
-  ++HallSensorTicks; 
-}
-
-void rotate_KTMode(){
-  old_c_KTMode=c_KTMode;
-  if(c_KTMode == 'a'){
-     c_KTMode='c';
-     move_close();
-  }else if (c_KTMode == 'c'){
-     c_KTMode='a';  
-  }else if (c_KTMode == 'm'){
-     c_KTMode='c';
-     move_close();
-  }else if (c_KTMode == 'f'){
-     c_KTMode='c';
-     move_close();
-  }
-  debug(("new mode from: %c to %c\n"),old_c_KTMode,c_KTMode);
-}
-
-#include <FastSPI_LED2.h>
-CRGB leds[NUM_LEDS];
-
-
-void print_debug(){
-  int i;
-  debug(("Speed [%d], ServoPosL [%d], ServoPosR [%d], c_KTMode [%c], LedMode [%d]\n"),Speed,myservo_links.read(),myservo_rechts.read(),c_KTMode,ledMode);
-}
-
-/** `========================================================================================================================================
- ** `========================================================================================================================================
- ** `========================================================================================================================================
- **
- **                                                E E P R O M 
- **
- ** `========================================================================================================================================
- ** `========================================================================================================================================
- ** `========================================================================================================================================
- **/
-#include <EEPROM.h>
- 
-int eepromReadInt(int address){
-   int value = 0x0000;
-   value = value | (EEPROM.read(address) << 8);
-   value = value | EEPROM.read(address+1);
-   return value;
-}
- 
-void eepromWriteInt(int address, int value){
-//  while (!eeprom_is_ready());
-   cli();
-   EEPROM.write(address, (value >> 8) & 0xFF );
-   EEPROM.write(address+1, value & 0xFF);
-   sei();
-}
- 
-void saveSettings(void){
-  if(eepromReadInt(0) != ServoPos) eepromWriteInt(0,ServoPos);
-}
-
-void loadSettings(void){
-//  while (!eeprom_is_ready());
-  ServoPos=eepromReadInt(0);
-}
-
 
 
 /** `========================================================================================================================================
@@ -229,93 +113,10 @@ void loadSettings(void){
  ** `========================================================================================================================================
  ** `========================================================================================================================================
  **/
-int ledsX[NUM_LEDS][3]; //-ARRAY FOR COPYING WHATS IN THE LED STRIP CURRENTLY (FOR CELL-AUTOMATA, ETC)
+ 
 
-//-PERISTENT VARS
-int idex = 0;        //-LED INDEX (0 to NUM_LEDS-1
-int idx_offset = 0;  //-OFFSET INDEX (BOTTOM LED TO ZERO WHEN LOOP IS TURNED/DOESN'T REALLY WORK)
-
-const int dblflashPattern[][30] PROGMEM = { 
-    {128,0,0,1},
-    {255,0,0,1},
-    {255,0,128,1},
-    {255,0,255,1},
-    {255,255,255,30},
-    {255,0,255,1},
-    {255,0,128,1},
-    {255,0,0,1},
-    {128,0,0,1},
-    {0,0,0,130},
-
-    {128,0,0,1},
-    {255,0,0,1},
-    {255,0,128,1},
-    {255,0,255,1},
-    {255,255,255,30},
-    {255,0,255,1},
-    {255,0,128,1},
-    {255,0,0,1},
-    {128,0,0,1},
-    {0,0,0,130},
-
-    {128,0,0,1},
-    {255,0,0,1},
-    {255,0,128,1},
-    {255,0,255,1},
-    {255,255,255,30},
-    {255,0,255,1},
-    {255,0,128,1},
-    {255,0,0,1},
-    {128,0,0,1},
-    {0,0,0,800},
-  };    
-
-/* Helper functions */
-
-// Create a 24 bit color value from R,G,B
-uint32_t Color(byte r, byte g, byte b)
-{
-  uint32_t c;
-  c = r;
-  c <<= 8;
-  c |= g;
-  c <<= 8;
-  c |= b;
-  return c;
-}
-
-
-//Input a value 0 to 255 to get a color value.
-//The colours are a transition r - g -b - back to r
-uint32_t Wheel(byte WheelPos)
-{
-  if (WheelPos < 85) {
-   return Color(WheelPos * 3, 255 - WheelPos * 3, 0);
-  } else if (WheelPos < 170) {
-   WheelPos -= 85;
-   return Color(255 - WheelPos * 3, 0, WheelPos * 3);
-  } else {
-   WheelPos -= 170; 
-   return Color(0, WheelPos * 3, 255 - WheelPos * 3);
-  }
-}
-
-void setColor(int pix, uint32_t c){
-  leds[pix].r = (c >> 16) & 0xFF;
-  leds[pix].g = (c >> 8) & 0xFF;
-  leds[pix].b = c & 0xFF;
-}
-
-//-SET THE COLOR OF A SINGLE RGB LED
-void set_color_led(int adex, int cred, int cgrn, int cblu) {  
-  int bdex;
-  
-  if (idx_offset > 0) {  //-APPLY INDEX OFFSET 
-    bdex = (adex + idx_offset) % NUM_LEDS;
-  }
-  else {bdex = adex;}
-  leds[idx_offset].setRGB( cred, cgrn, cblu);
-}
+#include <FastSPI_LED2.h>
+CRGB leds[NUM_LEDS];
 
 void all_off() { //-SET ALL LEDS TO ONE COLOR
     for(int i = 0 ; i < NUM_LEDS; i++ ) {
@@ -323,7 +124,6 @@ void all_off() { //-SET ALL LEDS TO ONE COLOR
     }  
     LEDS.show();       
     delay(15);
-    ledMode=0;
 }
 
 void one_color_all(int cred, int cgrn, int cblu) { //-SET ALL LEDS TO ONE COLOR
@@ -335,48 +135,58 @@ void one_color_all(int cred, int cgrn, int cblu) { //-SET ALL LEDS TO ONE COLOR
     delay(15);
 }
 
-
 //------------------------LED EFFECT FUNCTIONS------------------------
 
-void LED_set(char *part,int rval, int gval, int bval=0,int force_update=0){
-  for (int i=0;i<5;i++){
-    //debug(("LEDset: matching %s with %s\n"),part,LED_seg[i].name);
-    
-    if(strcmp(LED_seg[i].name,part)==0){
-      //debug(("LEDset: match, setting %s to %d,%d,%d\n"),LED_seg[i].name,rval,gval,bval);
-      for( int idx = LED_seg[i].PINSTART ; idx < LED_seg[i].PINEND; idx++ ) {
-        leds[idx].setRGB( rval,gval,bval);
-      }
-      LED_seg[i].set=1;
-      if(rval==0 && gval==0 && bval==0) LED_seg[i].set=0;
-      if(force_update==1) LEDS.show(); 
-    }
-  }
-}
-
-
 void breathe(){
-  int bval = map((exp(sin((millis()-3500)/1000.0*25/60*PI)) - 0.36787944)*107.38,0,255,0,maxbright);
-  LED_set("body",0,0,bval);
-  
-  int eval = map((exp(sin((millis()-3500)/1000.0*(55)/60*PI)) - 0.36787944)*107.38,0,255,0,maxbright);
-  if(ServoPos<=10) LED_set("eyes",eval,0,0);
-  else if(ServoPos>=170) LED_set("eyes",0,eval,0);
-  
-  int mval = map((exp(sin((millis()-3500)/1000.0*(85)/60*PI)) - 0.36787944)*107.38,0,255,0,maxbright);
-  LED_set("mask",0,0,mval);
+	//rims back
+	int time=millis();
+	for( int idx = LEDpart[0][0] ; idx < LEDpart[0][1]; idx++ ) {
+	  int rval=map((exp(sin(((millis()+(idx*1000))-3500)/1000.0*(75)/60*PI)) - 0.36787944)*107.38,0,255,0,maxbright);
+    if(my_PIN[1] == true) leds[idx].setRGB( rval,rval,rval);
+		else leds[idx].setRGB( 0,0,0 );
+  } 
+	//rims front
+  for( int idx = LEDpart[1][0] ; idx < LEDpart[1][1]; idx++ ) {
+	  int rval=map((exp(sin(((millis()+(idx*1000))-3500)/1000.0*(75)/60*PI)) - 0.36787944)*107.38,0,255,0,maxbright);
+    if(my_PIN[2] == true) leds[idx].setRGB( rval,rval,rval);
+		else leds[idx].setRGB( 0,0,0 );
+  }
 
-  int rval=map((exp(sin((millis()-3500)/1000.0*(75)/60*PI)) - 0.36787944)*107.38,0,255,0,maxbright);
-  LED_set("rims_front",rval/3,rval/3,rval/3);
-  LED_set("rims_back",rval/3,rval/3,rval/3);
+	//body
+  for( int idx = LEDpart[2][0] ; idx < LEDpart[2][1]; idx++ ) {
+		int bval = map((exp(sin((millis()-3500)/1000.0*25/60*PI)) - 0.36787944)*107.38,0,255,0,maxbright);
+    if(my_PIN[3] == true) leds[idx].setRGB( 0,0,bval);
+		else leds[idx].setRGB( 0,0,0 );
+  }
+  
+	//mask
+	for( int idx = LEDpart[3][0] ; idx < LEDpart[3][1]; idx++ ) {
+		int mval = map((exp(sin((millis()-3500)/1000.0*(85)/60*PI)) - 0.36787944)*107.38,0,255,0,maxbright);
+		if(my_PIN[4] == true) leds[idx].setRGB( 0,0,mval);
+		else leds[idx].setRGB( 0,0,0 );
+  }
 
-  flashing();
+	// eyes
+	for( int idx = LEDpart[4][0] ; idx < LEDpart[4][1]; idx++ ) {
+		int eval = map((exp(sin((millis()-3500)/1000.0*(55)/60*PI)) - 0.36787944)*107.38,0,255,0,maxbright);
+		int rval = eval*170/maxbright;
+		int gval = eval*43/maxbright;
+		int bval = eval;
+		if(my_PIN[5] == true) leds[idx].setRGB( rval,gval,bval);
+		else leds[idx].setRGB( 0,0,0 );
+  } 
+  
+	if(time > nextUpdate){
+		//debug("PINS %d %d %d %d %d %d",my_PIN[1],my_PIN[2],my_PIN[3],my_PIN[4],my_PIN[5],my_PIN[6]);
+		nextUpdate=time+2000;
+	}
+  if(my_PIN[6] == true) flashing();
   LEDS.show(); 
 }
 
 void flashing(){
   int i,factor=1;
-  for(int flaeschess=10;flaeschess>0;flaeschess--){
+  for(int flaeschess=100;flaeschess>0;flaeschess--){
     if(random(500/factor)==0){
       factor=10;
       int ovalr=leds[LED_STRIP_EYE_START].r;
@@ -396,543 +206,405 @@ void flashing(){
   }
 }
 
-void dblflash() {
-  if(time > nextUpdate){
-    debug(("LED: dblflash\n"));
-    nextUpdate=millis()+1000;
-  }
-  
-  for(int cyc=0; cyc<31; cyc++){
-    //pl("cyc: %d, (%d,%d,%d) wait: %d",dblflashPattern[cyc][0], dblflashPattern[cyc][1], dblflashPattern[cyc][2], dblflashPattern[cyc][3]);
-    for(int x=0; x<(NUM_LEDS); x++){
-      leds[x].setRGB(pgm_read_byte(&dblflashPattern[cyc][0]), pgm_read_byte(&dblflashPattern[cyc][1]),pgm_read_byte(&dblflashPattern[cyc][2]));
-    }
-    LEDS.show();
-    delay(pgm_read_byte(&dblflashPattern[cyc][3]));
-  }  
-}
 
-
-void rainbow(uint8_t wait) {
-  if(time > nextUpdate){
-    debug(("LED: rainbow\n"));
-    nextUpdate=millis()+1000;
-  }
-  int i, j;
-   
-  for (j=0; j < 256; j++) {     // 3 cycles of all 256 colors in the wheel
-    for (i=0; i < NUM_LEDS; i++) {
-      setColor(i, Wheel( (i + j) % 255));
-    }  
-    LEDS.show();   // write all the pixels out
-    delay(wait);
-  }
-}
-
-// Slightly different, this one makes the rainbow wheel equally distributed 
-// along the chain
-void rainbowCycle(uint8_t wait) {
-  if(time > nextUpdate){
-    debug(("LED: rainbowCycle\n"));
-    nextUpdate=millis()+1000;
-  }
-
-  int i, j;
-  
-  for (j=0; j < 256 * 5; j++) {     // 5 cycles of all 25 colors in the wheel
-    for (i=0; i < NUM_LEDS; i++) {
-      // tricky math! we use each pixel as a fraction of the full 96-color wheel
-      // (thats the i / strip.numPixels() part)
-      // Then add in j which makes the colors go around per pixel
-      // the % 96 is to make the wheel cycle around
-      setColor(i, Wheel( ((i * 256 / NUM_LEDS) + j) % 256) );
-    }  
-    LEDS.show();   // write all the pixels out
-    delay(wait);
-  }
-}
-
-
-
-void antialisedPoint(int r, int g, int b, int step, int dscale, int sleep)
-{
-  int screenOffset = int(1.0/(step*dscale/100))+1;
-  for (int j=-screenOffset; j<(NUM_LEDS/step + screenOffset);j++){
-    for (int i=0;i<NUM_LEDS;i++){
-      int delta = 1-abs(i-j*step)/1000*dscale;
-      if(delta<0) delta=0;
-      leds[i].setRGB( (delta*r), (delta*g), (delta*b));
-      //debug(("LED: set Nr %d to (%d,%d,%d)\n"), i, (delta*r), (delta*g), (delta*b));
-    }
-    LEDS.show();      
-  }
-}
-
-signed int larson_pos=0;
-signed int larson_dir=1;
-
-// "Larson scanner" = Cylon/KITT bouncing light effect
-void larson_scanner() {
-  int i, j;
-  int r=0,  g=0, b=maxbright, wait=0;
-
-  //if(printDEBUG==1) debug(("LED: NEW larson pos is now %d, dir is now %d\n"),larson_pos,larson_dir);
-  for(i=0; i<((NUM_LEDS-1) ); i++) {
-    //if(printDEBUG==1) debug(("LED: FRESH1 larson pos is now %d\n"),larson_pos);
-    // Draw 5 pixels centered on pos. setPixelColor() will clip
-    // any pixels off the ends of the strip, no worries there.
-    // we'll make the colors dimmer at the edges for a nice pulse
-    // look
-    leds[(larson_pos - 3)].setRGB(r/16, g/16, b/16);
-    leds[(larson_pos - 2)].setRGB(r/8, g/8, b/8);
-    leds[(larson_pos - 1)].setRGB(r/4, g/4, b/4);
-    leds[(larson_pos)].setRGB(maxbright, maxbright, b);
-    leds[(larson_pos + 1)].setRGB(r/4, g/4, b/4);
-    leds[(larson_pos + 2)].setRGB(r/8, g/8, b/8);
-    leds[(larson_pos + 3)].setRGB(r/16, g/16, b/16);
-
-    int opos=(int)larson_pos;
-    //if(printDEBUG==1) debug(("LED: FRESH2 larson pos is now %d %d\n"),larson_pos,opos);
-    
-    LEDS.show();
-    delay(1);
-    
-    larson_pos=(int)opos;
-    //if(printDEBUG==1) debug(("LED: FRESH3 larson pos is now %d %d\n"),larson_pos,opos);
-    
-    //delay(wait);
-    // If we wanted to be sneaky we could erase just the tail end
-    // pixel, but it's much easier just to erase the whole thing
-    // and draw a new one next time.
-    for(j=-2; j<= 2; j++)
-        leds[(larson_pos + j)].setRGB(0,0,0);
-    // Bounce off ends of strip
-
-    //if(printDEBUG==1) debug(("LED: FRESH4 larson pos is now %d\n"),larson_pos);
-    
-    if(larson_dir == 1){
-      //if(printDEBUG==1) debug(("LED: INCDEC larson dir is positive inc %d\n"),larson_pos);
-      larson_pos=larson_pos+1;
-      //if(printDEBUG==1) debug(("LED: INCDEC larson pos is now %d\n"),larson_pos);
-    }else
-    if(larson_dir == -1){
-      //if(printDEBUG==1) debug(("LED: INCDEC larson dir is negative dec %d\n"),larson_pos);
-      larson_pos=larson_pos-1;
-      //if(printDEBUG==1) debug(("LED: INCDEC larson pos is now %d\n"),larson_pos);
-    }
-    
-    //if(printDEBUG==1) debug(("LED: BETWEEN larson at newpos %d %d\n"),larson_pos,larson_dir);
-
-    if(larson_pos < 0) {
-      //if(printDEBUG==1) debug(("LED: WRAP larson turning dir positive at %d (newpos 1)\n"),larson_pos);
-      larson_pos = 1;
-      larson_dir = 1;
-      //if(printDEBUG==1) debug(("LED: WRAP larson pos is now %d, dir is now %d\n"),larson_pos,larson_dir);
-    } else if(larson_pos >= (NUM_LEDS-2)) {
-      //if(printDEBUG==1) debug(("LED: WRAP larson turning dir negative at %d (newpos 128)\n"),larson_pos);
-      larson_pos = 128;
-      larson_dir = -1;
-      //if(printDEBUG==1) debug(("LED: WRAP larson pos is now %d, dir is now %d\n"),larson_pos,larson_dir);
-    }
-  }
-}
-    
-void rotate_ledMode(){
-  ledMode++;
-  debug(("LED: ledMode now %d\n"),ledMode);
-  if(ledMode >5) ledMode=0;
-}
-
+long colorchange;
+int colorstep;
 void do_led_effects(){ 
-  //debug(("LED: running Effect id %d\n"),ledMode);
-  if (ledMode == 0) { all_off();}
-  else if (ledMode == 1) {breathe();}                //---STRIP RAINBOW FADE 
-  else if (ledMode == 2) {rainbow(1);}       //--- SIN WAVE BRIGHTNESS  
-  else if (ledMode == 3) {rainbowCycle(1);}       //--- SIN WAVE BRIGHTNESS  
-  else if (ledMode == 4) {dblflash();}       //--- SIN WAVE BRIGHTNESS  
-  else if (ledMode == 5) {antialisedPoint(0,0,100,3,3,0);}
-  else if (ledMode == 6) {larson_scanner();}
-  else breathe();
-}
+  breathe();
+	/**
+  for( int idx = 0 ; idx < 9; idx++ ) {
+    int bval = map((exp(sin((millis()+(1000/14*idx)-3500)/1000.0*(85)/60*PI)) - 0.36787944)*10.38,0,255,0,maxbright);
+      if(millis()-5000 > colorchange) {
+        if(bval==0){
+          colorchange=millis();colorstep++;
+        }
+      }
+      if(colorstep>1) colorstep=0;
+      if(colorstep<1){
+        leds[idx].setRGB( bval,0,0);
+      }else{
+        leds[idx].setRGB( 0,0,bval);
+      }
+   }**/
+   LEDS.show(); 
+   delay(random(5));
 
 
-/** `========================================================================================================================================
- ** `========================================================================================================================================
- ** `========================================================================================================================================
- **
- **                                                 A N D R O I D
- **
- ** `========================================================================================================================================
- ** `========================================================================================================================================
- ** `========================================================================================================================================
- **/
-void and_do_COMMAND(byte flag, byte numOfValues)
-{
-  uint8_t argc, i = 0;
-  char *arg[30],*cmd;
-  int length = meetAndroid.stringLength();
-  char data[length];
-  meetAndroid.getString(data);
-  arg[0] = strtok(data, " ");i=1;
-  do
-  {
-      arg[i] = strtok(NULL, " ");
-      i++;
-  } while ((i < 30) && (arg[i] != NULL));  
-  do_command(i,arg);
-}
-/** `========================================================================================================================================
- ** `========================================================================================================================================
- ** `========================================================================================================================================
- **
- **                                                SERIAL COMMANDS
- **
- ** `========================================================================================================================================
- ** `========================================================================================================================================
- ** `========================================================================================================================================
- **/
-void  sCmd_do_command(const char *comm){
-  uint8_t i = 1;
-  char *arg[30];
-  strcpy(arg[0],comm);
-  do
-  {
-      arg[i++] = sCmd.next();
-  } while ((i < 30) && (arg[i] != NULL));   
-  do_command(i,arg);
 }
 
 /** `========================================================================================================================================
- ** `========================================================================================================================================
- ** `========================================================================================================================================
- **
- **                                                S E R V O S
- **
- ** `========================================================================================================================================
- ** `========================================================================================================================================
- ** `========================================================================================================================================
- **/
+**
+**                                  H a r d w a r e   B u t t o n s
+**
+** `========================================================================================================================================
+**/
+#include <Button.h>
 
-void servo_attach(){ 
-  debug(("Exaust: attaching Servos [%d,%d]\n"),minFreq,maxFreq);
+#define BUT_COUNT 1
 
-  myservo_links.attach(PIN_SERVO_LINKS, minFreq, maxFreq);
-  myservo_rechts.attach(PIN_SERVO_RECHTS, minFreq, maxFreq);
-  delay(100);
+byte lastButStatus[BUT_COUNT]={'r'};
+byte ButStatus[BUT_COUNT]={'r'};
+
+Button But[BUT_COUNT] = { Button(TOUCH_SENS, LOW), };
+
+
+/** `========================================================================================================================================
+** `========================================================================================================================================
+** `========================================================================================================================================
+**
+**                                                S E R V O S
+**
+** `========================================================================================================================================
+** `========================================================================================================================================
+** `========================================================================================================================================
+**/
+
+#include <Servo.h>
+
+Servo myservo_links; // erzeugt ein Servo-Objekt
+Servo myservo_rechts; // erzeugt ein Servo-Objekt
+
+int specify_angular_speed=210; // msec per 60°
+
+void servo_attach(){
+	myservo_links.attach(PIN_SERVO_LINKS, minFreq, maxFreq);
+	myservo_rechts.attach(PIN_SERVO_RECHTS, minFreq, maxFreq);
 }
 
-void servo_detach(){ 
-  delay(250);
-  myservo_links.detach();
-  myservo_rechts.detach();
+void servo_detach(){
+	myservo_links.detach();
+	myservo_rechts.detach();
+}
+
+void getCurrPos(){
+	ServoPos=myservo_links.read();
+	ServoPosL=ServoPos;
+	ServoPosL=ServoPos;
 }
 
 void servo_write(int pos){
-  servo_attach();
-  myservo_links.write(pos);
-  myservo_rechts.write(pos);
-  ServoPos=pos;
-  debug(("Exaust: set to %d, pos is now (%d,%d) [%d,%d]\n"),pos,ServoPos,ServoPos,minFreq,maxFreq);
-  servo_detach();
+
+	servo_attach();
+	getCurrPos();  
+	int myway=ServoPos-pos;
+	int distance=abs(myway);
+	//debug("di %d",distance);
+	
+	int mydelay=abs(200+(specify_angular_speed/60*distance));
+	//debug("D %d",mydelay);
+	delay(50);
+	//if(pos > 160) pos=180;
+	//else if(pos < 10) pos=5;
+	myservo_links.write(pos);
+	myservo_rechts.write(pos);
+	delay(mydelay); // 0,11 ms/10 degrees
+	ServoPos=pos;
+	ServoPosL=pos;
+	ServoPosR=(pos);
+	debug("*S %d",ServoPos);
+	//debug("#S %d\n",ServoPos);
+	//	debug("#SL %d#",ServoPosL);
+	//	debug("#SR %d#",ServoPosR);
+	delay(50);
+	servo_detach();
+	//delay(150);
+	//debug("moved Servos\n",ServoPos);
 }
 
 void move_pos(int pos) {
-  if(ServoPos == pos) return;
-  servo_write(pos);
-  c_KTMode='m';
+	getCurrPos();
+	if(ServoPos == pos) return;
+	servo_write(pos);
+	c_KTMode='m';
 }
 
 void move_close() {
-  if(ServoPos == 0) return;
-  servo_write(0);
+	if(ServoPos <= 90) return;
+	servo_write(0);
 }
 
 void move_open() {
-  if(ServoPos >= 179) return;
-  servo_write(180);
+	if(ServoPos >= 90) return;
+	servo_write(180);
 }
+
 void Etoggle(){
-  move_pos((ServoPos==0)?179:0);
+	int newpos = (ServoPos > 90)?0:180;	
+	move_pos(newpos);
 }
 
 void Eclose(){
-  if (ServoPos == 0) return;
-  if (millis() <= Tlocked) {
-    return;
-  }
-  
-  //CLOSE 
-  move_close();
+	if (ServoPos == 0) return;
+	if (millis() <= Tlocked) {
+		return;
+	}
+	//CLOSE
+	move_close();
 }
 
 void Eopen(){
-  Tlocked=millis()+3000;
-  if (ServoPos == 179) return; 
-  // OPEN
-  move_open();
-}
-
-void do_servo_freq_adjust(){
-    if(minFreqTest==1){
-    minFreq=500;
-    c_KTMode='m';
-    maxFreqTest=0;
-    myservo_links.detach();
-    myservo_rechts.detach();
-    myservo_links.attach(PIN_SERVO_LINKS, minFreq+minFreqTestVal, maxFreq);
-    myservo_rechts.attach(PIN_SERVO_RECHTS, minFreq+minFreqTestVal, maxFreq);
-    delay(100);
-    myservo_links.write(0);
-    myservo_rechts.write(0);
-    delay(250);
-    debug(("Servo Min Freq: %d\n"),(minFreq+minFreqTestVal));
-    minFreqTestVal+=10;
-    if((minFreq+minFreqTestVal) > 1000) minFreqTest=0;
-  }else{
-    minFreqTestVal=0;
-  }
-    
-   if(maxFreqTest==1){
-     maxFreq=2400;
-     c_KTMode='m';
-    minFreqTest=0;
-    myservo_links.detach();
-    myservo_rechts.detach();
-    myservo_links.attach(PIN_SERVO_LINKS, minFreq, maxFreq-maxFreqTestVal);
-    myservo_rechts.attach(PIN_SERVO_RECHTS, minFreq, maxFreq-maxFreqTestVal);
-    delay(100);
-    myservo_links.write(180);
-    myservo_rechts.write(180);
-    delay(250);
-    debug(("Servo Max Freq: %d\n"),(maxFreq-maxFreqTestVal));
-    maxFreqTestVal+=10;
-    if((maxFreq-maxFreqTestVal) < 1800) maxFreqTest=0;
-  }    else{
-    maxFreqTestVal=0;
-  }
+	Tlocked=millis()+3000;
+	if (ServoPos >= 90) return;
+	// OPEN
+	move_open();
 }
 
 /** `========================================================================================================================================
- ** `========================================================================================================================================
- ** `========================================================================================================================================
- **
- **                                                S E T U P
- **
- ** `========================================================================================================================================
- ** `========================================================================================================================================
- ** `========================================================================================================================================
- **/
+**
+**                                  helper
+**
+** `========================================================================================================================================
+**/
+
+void rpm()      //This is the function that the interupt calls 
+{ 
+	++HallSensorTicks; 
+}
+
+void rotate_KTMode(){
+	old_c_KTMode=c_KTMode;
+	if(c_KTMode == 'a'){
+		c_KTMode='c';
+		move_close();
+	}else if (c_KTMode == 'c'){
+		c_KTMode='a';  
+	}else if (c_KTMode == 'm'){
+		c_KTMode='c';
+		move_close();
+	}else if (c_KTMode == 'f'){
+		c_KTMode='c';
+		move_close();
+	}
+	//debug("--- mode now %s ---\n",c_KTMode);
+}
+
+/** `========================================================================================================================================
+** `========================================================================================================================================
+** `========================================================================================================================================
+**
+**                                                 A N D R O I D
+**
+** `========================================================================================================================================
+** `========================================================================================================================================
+** `========================================================================================================================================
+**/
+
+void  sCmd_do_command(const char *comm){
+	uint8_t i = 1;
+	char *arg[30];
+	strcpy(arg[0],comm);i=1;
+	do
+	{
+		arg[i++] = sCmd.next();
+	} while ((i < 30) && (arg[i] != NULL));  
+	//sCmd.clearBuffer();
+	//printf_P("running %s",arg[0]);
+	do_command(i,arg);
+}
+
+void  sCmdBT_do_command(const char *comm){
+	uint8_t i = 1;
+	char *arg[30];
+	strcpy(arg[0],comm);i=1;
+	do
+	{
+		arg[i++] = sCmdBT.next();
+	} while ((i < 30) && (arg[i] != NULL));  
+	//sCmd.clearBuffer();
+	//printf_P("running %s",arg[0]);
+	do_command(i,arg);
+}
+
+/** `========================================================================================================================================
+** `========================================================================================================================================
+** `========================================================================================================================================
+**
+**                                                 C O M M A N D S
+**
+** `========================================================================================================================================
+** `========================================================================================================================================
+** `========================================================================================================================================
+**/
+
+void do_command(int argC,char **arg){
+	int i=0;
+	char *cmd=arg[0];
+
+
+	if(strcmp(cmd,"ex")==0){
+		if(arg[1] != NULL) {
+			servo_write(atoi(arg[1]));
+			c_KTMode='m';
+		}else{
+			Etoggle();
+		}
+	}else
+
+		
+		if(strcmp(cmd,"PIN")==0){
+			if(arg[1] != NULL && arg[2] != NULL){
+				my_PIN[atoi(arg[1])]=(boolean)atoi(arg[2]);
+				debug("*P %s %s",arg[1],arg[2]);
+//				debug("set my_PIN %s to %s",arg[1],arg[2]);
+			}else{
+				my_PIN[atoi(arg[1])]=!my_PIN[atoi(arg[1])];
+//				debug("set my_PIN to ?, toggeling");				
+				debug("*P %s %s",arg[1],my_PIN[atoi(arg[1])]);
+			}
+		}else
+
+		if(strcmp(cmd,"print")==0){
+			debug("Hello World");
+		}else
+
+			if(strcmp(cmd,"*INIT*")==0){
+				debug("*L"); 
+				for(int idx=1;idx<13;idx++){
+					debug("*P %d %d",idx,my_PIN[idx]);    
+				}
+				debug("*SPD %d",Speed);    
+				debug("*S %d",ServoPos);    
+				debug("Android connected over BT");
+			}else
+
+				if(strcmp(cmd,"minf")==0){
+					minFreq=atoi(arg[1]);
+					servo_write(0);
+				}else
+
+					if(strcmp(cmd,"maxf")==0){
+						maxFreq=atoi(arg[1]);
+						servo_write(180);
+					}else{
+						debug("unknown command:  %s",cmd);
+						//sCmdBT.clearBuffer();
+					}  
+}
+
+/** `========================================================================================================================================
+** `========================================================================================================================================
+** `========================================================================================================================================
+**
+**                                                S E T U P
+**
+** `========================================================================================================================================
+** `========================================================================================================================================
+** `========================================================================================================================================
+**/
 void setup() 
 { 
-  loadSettings();
-  pinMode(PIN_VSS_SENSOR, INPUT); 
-  attachInterrupt(2, rpm, RISING); 
-  digitalWrite(A2,HIGH);
-  digitalWrite(A3,HIGH);
-  digitalWrite(A4,HIGH);
-  digitalWrite(A5,HIGH);
 
-  int newDebounceDelay=250;  
-  for(int i=0; i<BUT_COUNT; i++){
-    But[i].setDebounceDelay(newDebounceDelay);
-  }
-  
-  delay(2000);
+	sCmd.setDefaultHandler(sCmd_do_command);
+	sCmdBT.setDefaultHandler(sCmdBT_do_command);
 
-  Serial.begin(57600);
-  
-  LEDS.addLeds<WS2801, 11, 13, BGR, DATA_RATE_MHZ(1)>(leds, NUM_LEDS);
+	myservo_links.write(180);
+	myservo_rechts.write(0);
 
-  meetAndroid.registerFunction(and_do_COMMAND, 'z');  
-  sCmd.setDefaultHandler(sCmd_do_command);
+	pinMode(PIN_VSS_SENSOR, INPUT); 
+	attachInterrupt(INTERRUPT_VSS, rpm, RISING); 
 
-  debug(("--- INIT COMPLETE ---\n"));
-//  print_debug();
+	pinMode(TOUCH_SENS,INPUT_PULLUP);
+
+
+	int newDebounceDelay=150;  
+	for(int i=0; i<BUT_COUNT; i++){
+		But[i].setDebounceDelay(newDebounceDelay);
+	}
+
+	LEDS.addLeds<WS2801, PIN_SPI_CLK, PIN_SPI_DATA, BGR, DATA_RATE_MHZ(1)>(leds, NUM_LEDS);
+
+	Serial.begin(BAUD_USB);
+	SerialBT.begin(9600);  
+
+
 } 
 
 
 /** `========================================================================================================================================
- ** `========================================================================================================================================
- ** `========================================================================================================================================
- **
- **                                                L  O  O  P
- **
- ** `========================================================================================================================================
- ** `========================================================================================================================================
- ** `========================================================================================================================================
- **/
+** `========================================================================================================================================
+** `========================================================================================================================================
+**
+**                                                L  O  O  P
+**
+** `========================================================================================================================================
+** `========================================================================================================================================
+** `========================================================================================================================================
+**/
 void loop () 
 {
+	time=millis();
 
-  int loopDebug=0;
-  time=millis();
-  meetAndroid.receive(); // you need to keep this in your loop() to receive events    
-  sCmd.readSerial();
+	sCmd.readSerial();
+	sCmdBT.readSerial(&SerialBT); 
 
-  if ( (time-lastPulseRead) > 1000 ) {
-    lastSpeed=Speed;
-    lastPulseRead=time;
-    Speed = (HallSensorTicks/9.09888888888888);
-    if(lastSpeed != Speed){
-      debug(("Speed: %d km/h => %d km/h\tServo %d\tHallSensorTicks %d\n"),lastSpeed,Speed,ServoPos,HallSensorTicks);
-    }
-    HallSensorTicks=0;
-  }
+	if ( (time-lastPulseRead) > 1000 ) {
+		lastSpeed=Speed;
+		lastPulseRead=time;
+		Speed = (HallSensorTicks/9.09888888888888);
+		if(Speed!=lastSpeed) debug("*SPD %d",Speed);
 
-  for(int i=0; i<BUT_COUNT; i++){
-    lastButStatus[i]=ButStatus[i];
-    if(lastButStatus[i]== 'H') ButStatus[i]='h';
-    if(lastButStatus[i]== 'P') ButStatus[i]='p';
-    if(lastButStatus[i]== 'R') ButStatus[i]='r';
-    if(lastButStatus[i]== 'D') ButStatus[i]='d';
-  }
-  
-  for(int i=0; i<BUT_COUNT; i++){
-    But[i].listen();
-  }
+		HallSensorTicks=0;
+	}
 
-//  if (loopDebug==1) debug(("-- Button react\n"));
-  if(time >5000){
-    for(int i=0; i<BUT_COUNT; i++){
-      if(But[i].isHold()){  
-        if(lastButStatus[i]!= 'H'){
-          debug(("But[%d] hold\n"),i,lastButStatus[i]);
-          if(i == 0) c_KTMode='f';
-        }
-        ButStatus[i]='H';
-      }else
-      if(But[i].onPress()){
-        ButStatus[i]='P';
-        if(i == 0) rotate_KTMode();
-        if(i == 1) rotate_ledMode();
-        if(i == 3) ledMode=1;
-        if(i == 3) ledMode=0;
+	for(int i=0; i<BUT_COUNT; i++){
+		lastButStatus[i]=ButStatus[i];
+		if(lastButStatus[i]== 'H') ButStatus[i]='h';
+		if(lastButStatus[i]== 'P') ButStatus[i]='p';
+		if(lastButStatus[i]== 'R') ButStatus[i]='r';
+		if(lastButStatus[i]== 'D') ButStatus[i]='d';
+	}
+	for(int i=0; i<BUT_COUNT; i++){
+		But[i].listen();
+	}
 
-        debug(("But[%d] pressed\n"),i);
-      }else
-      if(But[i].onRelease()){
-        ButStatus[i]='R';
-        debug(("But[%d] released\n"),i);
-      }else
-      if(But[i].onDoubleClick()){
-        ButStatus[i]='D';
-        debug(("But[%d] dblclicked\n"),i);
-      }    
-    }
-   }
-  
-//  if (loopDebug==1) debug(("-- KTMode react\n"));
-  // rotate modi automatic > closed  / forced => closed
-   
-  if ( c_KTMode == 'f'){
-     move_open();
-  }else if (c_KTMode == 'a'){
-    switch (Speed) {
-    case 0 ... 1:
-      Eclose();          
-      break;
-    case 45 ... 65:
-      Eclose();
-      break;
-    default:
-      Eopen();        
-      break;
-    }
-  }else if (c_KTMode == 'c'){
-     move_close();
-  }
+	if(time >5000){
+		for(int i=0; i<BUT_COUNT; i++){
+			if(But[i].isHold()){  
+				if(lastButStatus[i]!= 'H') c_KTMode='f';
+				ButStatus[i]='H';
+			}else
+				if(But[i].onPress()){
+					if(lastButStatus[i]!= 'P') rotate_KTMode();  
+					ButStatus[i]='P';
+				}else
+					if(But[i].onRelease()){
+						ButStatus[i]='R';
+					}else
+						if(But[i].onDoubleClick()){
+							ButStatus[i]='D';
+						}    
+		}
+	}
 
-//  if (loopDebug==1)   debug(("-- check print debug listen\n"));
-  if(time > nextUpdate){
-    if(printDEBUG==true) print_debug();
-    nextUpdate=millis()+5000;
-  }
-//  if (loopDebug==1) debug(("-- do LED Effects \n"));
 
-// do_servo_freq_adjust();
 
-  do_led_effects();
+	if ( c_KTMode == 'f'){
+		move_open();
+	}else if (c_KTMode == 'a'){
+		if(lastSpeed!=Speed){
+			switch (Speed) {
+			case 0 ... 1:
+				Eclose();          
+				break;
+			case 45 ... 65:
+				Eclose();
+				break;
+			default:
+				Eopen();        
+				break;
+			}
+		}
+	}else if (c_KTMode == 'c'){
+		move_close();
+	}else{
+		// 'm'
+	}
+	if(time > nextUpdate){
+//		debug("*SPD %d",Speed);
+		nextUpdate=time+2000;
+	}
+	do_led_effects();
 }
-  
-/** `========================================================================================================================================
- ** `========================================================================================================================================
- ** `========================================================================================================================================
- **
- **                                                 C O M M A N D S
- **
- ** `========================================================================================================================================
- ** `========================================================================================================================================
- ** `========================================================================================================================================
- **/
-void do_command(int argC,char **arg){
-  int i=0;
-  char *cmd=arg[0];
-  
-  if(strcmp(cmd,"mode")==0){
-    ledMode = atoi(arg[1]);
-    debug(("new LED mode: %d\n"),ledMode);
-  }else
-  if(strcmp(cmd,"ex")==0){
-    if(arg[1] != NULL) {
-      servo_write(atoi(arg[1]));
-      c_KTMode='m';
-      debug(("Exaust Servo pos: %d\n"),atoi(arg[1]));
-    }else{
-      Etoggle();
-      debug(("toggled exaust\n"));
-    }
-  }else
 
-  if(strcmp(cmd,"toggle")==0){
-    if(arg[1] != NULL ){
-      c_KTMode = arg[1][0];
-    }else{
-       rotate_KTMode();
-    }    
-    debug(("new c_KTMode: %s\n"),c_KTMode);
-  }else
-  if(strcmp(cmd,"bri")==0){
-    if(arg[1] != NULL ){
-      maxbright=atoi(arg[1]);
-      debug(("new LED brightness: %d\n"),atoi(arg[1]));
-    }
-  }else
 
-  if(strcmp(cmd,"led")==0){
-    LED_set(arg[1],atoi(arg[2]),atoi(arg[3]),atoi(arg[4]));
-    debug(("LED set: %s to %d/%d/%d\n"),arg[1],atoi(arg[2]),atoi(arg[3]),atoi(arg[4]) );
-  }else
 
-  if(strcmp(cmd,"print")==0){
-    print_debug();
-  }else
-
-  if(strcmp(cmd,"mintest")==0){
-    minFreqTest=!minFreqTest;
-  }else
-
-  if(strcmp(cmd,"maxtest")==0){
-    maxFreqTest=!maxFreqTest;
-  }else
-
-  if(strcmp(cmd,"minf")==0){
-    minFreq=atoi(arg[1]);
-    debug(("minFreq is now: %d\n"),minFreq);
-    servo_write(0);
-  }else
-
-  if(strcmp(cmd,"maxf")==0){
-    maxFreq=atoi(arg[1]);
-    debug(("maxFreq is now: %d\n"),maxFreq);
-    servo_write(180);
-  }else
-
-  if(strcmp(cmd,"debug")==0){
-    printDEBUG=!printDEBUG;
-    debug(("print debug is now: %d\n"),printDEBUG);
-  }else{
-    debug(("unknown command: %s\n"),arg[0]);
-    debug(("valid commands:\nmode,ex,toggle,bri,mintest,maxtest,minf,maxf,print,debug\n"));
-  }  
-}
-  
